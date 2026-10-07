@@ -3,9 +3,15 @@
 #include <numbers>
 #include <cmath>
 #include <algorithm>
+#include <Novice.h>
+#define _USE_MATH_DEFINES
 #include "MyMathUtility.h"
+#include <algorithm>
 #include <assert.h>
+#include <chrono>
+#include <cmath>
 #include <imgui.h>
+#include <numbers>
 
 using namespace KamataEngine;
 
@@ -18,12 +24,20 @@ struct Spherical {
 	float phi;
 };
 
-Vector3 ToCartesian(const Spherical& s) { 
+
+Vector3 ToCartesian(const Spherical& s) {
 	float rho = s.radius * cos(s.theta);
 	return {rho * cos(s.phi), s.radius * sin(s.theta), rho * sin(s.phi)};
 }
 
-Spherical ToSpherical(const Vector3& p) { float r = sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+enum InterpolationMode {
+	Linear,
+	Exponential
+};
+
+
+Spherical ToSpherical(const Vector3& p) {
+	float r = sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
 	if (r == 0.0f) {
 		return {0.0f, 0.0f, 0.0f};
 	}
@@ -41,7 +55,7 @@ const char kWindowTitle[] = "LE2C_18_ツノダ_タケマサ";
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	// ライブラリの初期化
-	Novice::Initialize(kWindowTitle, 1280, 720);
+	Novice::Initialize(kWindowTitle, kWindowWidth, kWindowHeight);
 
 	// キー入力結果を受け取る箱
 	char keys[256] = {0};
@@ -54,13 +68,37 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int prevMouseY = 0;
 	bool isFirstClick = true;
 
-	// デバッグカメラ用の初期位置
+	// --------------------------------------------------
+	// デバッグカメラ用変数
+	// --------------------------------------------------
+	bool enableDebugCamera = false; // デバッグカメラのON/OFFフラグ
 	Vector3 cameraTranslate{0.0f, 4.0f, -10.0f};
 	Vector3 cameraRotate{0.45f, 0.0f, 0.0f};
 	float cameraSpeed = 0.08f;
 	float mouseSensitivity = 0.005f;
 
 	Spherical s{6.0f, 0.0f, -std::numbers::pi_v<float> / 2.0f};
+
+	// --------------------------------------------------
+	// 円の追従補間用変数 
+	// --------------------------------------------------
+	// 1. 円 A (赤色・マウス座標ターゲット / 半径 12)
+	Vector2 circle_target = {0.0f, 0.0f};
+	float radiusA = 12.0f;
+
+	// 2. 円 B (緑色・追従側 / 初期座標 640, 360 / 半径 20)
+	Vector2 circle_pos = {640.0f, 360.0f};
+	float radiusB = 20.0f;
+
+	// 4. 追従速度パラメータ (speed)
+	float speed = 10.0f;
+
+	//  60fps 前提の固定 deltaTime
+	const float deltaTime = 1.0f / 60.0f;
+
+
+	// 補間モード (デフォルトは線形補間)
+	int currentMode = InterpolationMode::Linear;
 
 	// ウィンドウの×ボタンが押されるまでループ
 	while (Novice::ProcessMessage() == 0) {
@@ -74,118 +112,164 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 		/// ↓更新処理ここから
 		///
+
 		// マウス位置の更新
 		prevMouseX = currentMouseX;
 		prevMouseY = currentMouseY;
 		Novice::GetMousePosition(&currentMouseX, &currentMouseY);
 
+		// 円 A (ターゲット) の位置をマウス位置に設定
+		circle_target.x = static_cast<float>(currentMouseX);
+		circle_target.y = static_cast<float>(currentMouseY);
+
+		if (currentMode == InterpolationMode::Linear) {
+			// 線形補間: pos += (speed * deltaTime) * (target - pos)
+			circle_pos.x += (speed * deltaTime) * (circle_target.x - circle_pos.x);
+			circle_pos.y += (speed * deltaTime) * (circle_target.y - circle_pos.y);
+		} else if (currentMode == InterpolationMode::Exponential) {
+			// 指数補間: factor = 1 - exp(-speed * deltaTime)
+			float factor = 1.0f - std::exp(-speed * deltaTime);
+			circle_pos.x += factor * (circle_target.x - circle_pos.x);
+			circle_pos.y += factor * (circle_target.y - circle_pos.y);
+		}
+		// [C]キーでデバッグカメラのON/OFF切り替え
+		if (preKeys[DIK_C] == 0 && keys[DIK_C] != 0) {
+			enableDebugCamera = !enableDebugCamera;
+		}
+
 		// ==================================================
-		// FPSスタイル・デバッグカメラ操作
+		// FPSスタイル・デバッグカメラ操作 (ONの時のみ動作)
 		// ==================================================
-		if (Novice::IsPressMouse(1)) {
-			if (isFirstClick) {
-				isFirstClick = false;
+		if (enableDebugCamera) {
+			if (Novice::IsPressMouse(1)) {
+				if (isFirstClick) {
+					isFirstClick = false;
+				} else {
+					float deltaX = float(currentMouseX - prevMouseX);
+					float deltaY = float(currentMouseY - prevMouseY);
+
+					cameraRotate.y += deltaX * mouseSensitivity;
+					cameraRotate.x += deltaY * mouseSensitivity;
+
+					cameraRotate.x = std::clamp(cameraRotate.x, -float(M_PI) / 2.1f, float(M_PI) / 2.1f);
+				}
 			} else {
-				float deltaX = float(currentMouseX - prevMouseX);
-				float deltaY = float(currentMouseY - prevMouseY);
-
-				cameraRotate.y += deltaX * mouseSensitivity;
-				cameraRotate.x += deltaY * mouseSensitivity;
-
-				cameraRotate.x = std::clamp(cameraRotate.x, -float(M_PI) / 2.1f, float(M_PI) / 2.1f);
+				isFirstClick = true;
 			}
-		} else {
-			isFirstClick = true;
+
+			Matrix4x4 rotationMatrix = MyMathUtility::Multiply(MyMathUtility::MakeRotateXMatrix(cameraRotate.x), MyMathUtility::MakeRotateYMatrix(cameraRotate.y));
+
+			Vector3 moveDir = {0.0f, 0.0f, 0.0f};
+			if (keys[DIK_W])
+				moveDir.z += 1.0f;
+			if (keys[DIK_S])
+				moveDir.z -= 1.0f;
+			if (keys[DIK_D])
+				moveDir.x += 1.0f;
+			if (keys[DIK_A])
+				moveDir.x -= 1.0f;
+
+			if (moveDir.x != 0.0f || moveDir.z != 0.0f) {
+				Vector3 transformedDir = MyMathUtility::Transform(moveDir, rotationMatrix);
+				cameraTranslate.x += transformedDir.x * cameraSpeed;
+				cameraTranslate.y += transformedDir.y * cameraSpeed;
+				cameraTranslate.z += transformedDir.z * cameraSpeed;
+			}
+
+			if (keys[DIK_SPACE])
+				cameraTranslate.y += cameraSpeed;
+			if (keys[DIK_LSHIFT])
+				cameraTranslate.y -= cameraSpeed;
+
+			if (keys[DIK_R]) {
+				cameraTranslate = {0.0f, 4.0f, -10.0f};
+				cameraRotate = {0.45f, 0.0f, 0.0f};
+			}
 		}
 
-		Matrix4x4 rotationMatrix = MyMathUtility::Multiply(MyMathUtility::MakeRotateXMatrix(cameraRotate.x), MyMathUtility::MakeRotateYMatrix(cameraRotate.y));
-
-		Vector3 moveDir = {0.0f, 0.0f, 0.0f};
-		if (keys[DIK_W])
-			moveDir.z += 1.0f;
-		if (keys[DIK_S])
-			moveDir.z -= 1.0f;
-		if (keys[DIK_D])
-			moveDir.x += 1.0f;
-		if (keys[DIK_A])
-			moveDir.x -= 1.0f;
-
-		if (moveDir.x != 0.0f || moveDir.z != 0.0f) {
-			Vector3 transformedDir = MyMathUtility::Transform(moveDir, rotationMatrix);
-			cameraTranslate.x += transformedDir.x * cameraSpeed;
-			cameraTranslate.y += transformedDir.y * cameraSpeed;
-			cameraTranslate.z += transformedDir.z * cameraSpeed;
-		}
-
-		if (keys[DIK_SPACE])
-			cameraTranslate.y += cameraSpeed;
-		if (keys[DIK_LSHIFT])
-			cameraTranslate.y -= cameraSpeed;
-
-		if (keys[DIK_R]) {
-			cameraTranslate = {0.0f, 4.0f, -10.0f};
-			cameraRotate = {0.45f, 0.0f, 0.0f};
-		}
-
-		// ==================================================
-		// カメラ操作での中心と真上・真下を避ける制限
-		// ==================================================
-		// 真上(theta = pi/2)や真下(-pi/2)では世界の上と前Fが平行になり右Rの軸を作れないため制限する
-		// 中心(r = 0)では注視点とカメラが重なり前Fが定まらないため制限する[cite: 11]
+		// カメラ座標の制限・計算
 		const float limit = std::numbers::pi_v<float> / 2.0f - 0.01f;
 		s.radius = (std::max)(s.radius, 0.1f);
 		s.theta = std::clamp(s.theta, -limit, limit);
 
-		// ==================================================
-		// 球面座標からカメラ位置(eye)の計算
-		// ==================================================
-
 		Vector3 target = {0.0f, 0.0f, 0.0f};
-
 		Vector3 offset = ToCartesian(s);
 		Vector3 eye = MyMathUtility::Add(target, offset);
 
-		// ==================================================
-		// 注視点を向くカメラのワールド行列の作成
-		// ==================================================
 		Vector3 worldUp = {0.0f, 1.0f, 0.0f};
-
-		// 1. 注視点 - カメラ位置で前 F を求める
 		Vector3 forward = MyMathUtility::Normalize(MyMathUtility::Subtract(target, eye));
-
-		// 2. 世界の上と前 F の外積で右 R を求める[cite: 9]
 		Vector3 right = MyMathUtility::Normalize(MyMathUtility::Cross(worldUp, forward));
-
-		// 3. 前 F と右 R の外積でカメラ自身の上 U を再計算する[cite: 9]
 		Vector3 up = MyMathUtility::Cross(forward, right);
 
-		// 求めた右・上・前とカメラ位置を行列に格納する[cite: 6]
-		Matrix4x4 cameraMatrix = {right.x, right.y, right.z, 0.0f, up.x, up.y, up.z, 0.0f, forward.x, forward.y, forward.z, 0.0f, eye.x, eye.y, eye.z, 1.0f}; //[cite: 10]
-		
+		Matrix4x4 cameraMatrix = {right.x, right.y, right.z, 0.0f, up.x, up.y, up.z, 0.0f, forward.x, forward.y, forward.z, 0.0f, eye.x, eye.y, eye.z, 1.0f};
+
 		// ===================================
 		// ImGui の処理
 		// ===================================
-		ImGui::Begin("Spherical Coordinates");
 
-		ImGui::Text("Target: (0, 0, 0) / +Y up / Camera +Z forward");
+		ImGui::Begin("Interpolation Controller");
 
-		// 球面座標(角度はrad表記)を編集可能にする
-		ImGui::DragFloat("Radius", &s.radius, 0.01f);
-		ImGui::DragFloat("Theta: elevation (rad)", &s.theta, 0.01f);
-		ImGui::DragFloat("Phi (rad)", &s.phi, 0.01f);
+		ImGui::Checkbox("Enable Debug Camera (Hotkey: C)", &enableDebugCamera);
+		ImGui::Separator();
 
-		// 変換した直交座標と、作成したカメラ行列(4x4)を表示する
-		ImGui::Text("Spherical: r = %.3f, theta = %.3f rad, phi = %.3f rad", s.radius, s.theta, s.phi);
-		ImGui::Text("Cartesian: x = %.3f, y = %.3f, z = %.3f", eye.x, eye.y, eye.z);                  
+		ImGui::Text("Target: Mouse Position (Red Circle)");
+		ImGui::Separator();
 
-		ImGui::Text("Camera matrix"); 
-		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[0][0], cameraMatrix.m[0][1], cameraMatrix.m[0][2], cameraMatrix.m[0][3]);
-		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[1][0], cameraMatrix.m[1][1], cameraMatrix.m[1][2], cameraMatrix.m[1][3]);
-		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[2][0], cameraMatrix.m[2][1], cameraMatrix.m[2][2], cameraMatrix.m[2][3]);
-		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[3][0], cameraMatrix.m[3][1], cameraMatrix.m[3][2], cameraMatrix.m[3][3]);
+		// モードテキストの表示切り替え
+		if (currentMode == InterpolationMode::Linear) {
+			ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "[Linear Interpolation Mode]");
+		} else {
+			ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "[Exponential Decay Mode]");
+		}
+
+		// ★ 補間方式切り替え用ラジオボタン
+		ImGui::RadioButton("Linear (線形)", &currentMode, InterpolationMode::Linear);
+		ImGui::SameLine();
+		ImGui::RadioButton("Exponential (指数)", &currentMode, InterpolationMode::Exponential);
+
+		ImGui::SliderFloat("Speed", &speed, 0.0f, 100.0f, "%.1f");
+
+		float diffX = circle_target.x - circle_pos.x;
+		float diffY = circle_target.y - circle_pos.y;
+		float distance = std::sqrt(diffX * diffX + diffY * diffY);
+
+		ImGui::Text("Mouse Pos: (%.1f, %.1f)", circle_target.x, circle_target.y);
+		ImGui::Text("Circle Pos: (%.1f, %.1f)", circle_pos.x, circle_pos.y);
+		ImGui::Text("Distance to target: %.1f px", distance);
+
+		ImGui::Separator();
+
+		if (ImGui::Button("Snap to Target")) {
+			circle_pos = circle_target;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Reset to Center")) {
+			circle_pos = {640.0f, 360.0f};
+		}
 
 		ImGui::End();
 
+		// 球面座標・カメラ状態用のウィンドウ (デバッグカメラが有効な時に表示)
+		if (enableDebugCamera) {
+			ImGui::Begin("Spherical Coordinates");
+
+			ImGui::Text("Target: (0, 0, 0) / +Y up / Camera +Z forward");
+
+			ImGui::DragFloat("Radius", &s.radius, 0.01f);
+			ImGui::DragFloat("Theta: elevation (rad)", &s.theta, 0.01f);
+			ImGui::DragFloat("Phi (rad)", &s.phi, 0.01f);
+
+			ImGui::Text("Spherical: r = %.3f, theta = %.3f rad, phi = %.3f rad", s.radius, s.theta, s.phi);
+			ImGui::Text("Cartesian: x = %.3f, y = %.3f, z = %.3f", eye.x, eye.y, eye.z);
+
+			ImGui::Text("Camera matrix");
+			ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[0][0], cameraMatrix.m[0][1], cameraMatrix.m[0][2], cameraMatrix.m[0][3]);
+			ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[1][0], cameraMatrix.m[1][1], cameraMatrix.m[1][2], cameraMatrix.m[1][3]);
+			ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[2][0], cameraMatrix.m[2][1], cameraMatrix.m[2][2], cameraMatrix.m[2][3]);
+			ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[3][0], cameraMatrix.m[3][1], cameraMatrix.m[3][2], cameraMatrix.m[3][3]);
+
+			ImGui::End();
+		}
 
 		///
 		/// ↑更新処理ここまで
@@ -194,16 +278,21 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		///
 		/// ↓描画処理ここから
 		///
-		
-		// ビュー・プロジェクション計算
-		Matrix4x4 viewMatrix = MyMathUtility::Inverse(cameraMatrix);
 
+		// ビュー・プロジェクション計算 (将来的な3D描画用)
+		Matrix4x4 viewMatrix = MyMathUtility::Inverse(cameraMatrix);
 		Matrix4x4 projectionMatrix = MyMathUtility::MakePerspectiveFovMatrix(0.45f, float(kWindowWidth) / float(kWindowHeight), 0.1f, 100.0f);
 		Matrix4x4 viewProjectionMatrix = MyMathUtility::Multiply(viewMatrix, projectionMatrix);
-
 		Matrix4x4 viewportMatrix = MyMathUtility::MakeViewportMatrix(0, 0, float(kWindowWidth), float(kWindowHeight), 0.0f, 1.0f);
 
+		// 3. 円 A と 円 B の中心を結ぶ線を描画して追従の遅れを可視化
+		Novice::DrawLine(static_cast<int>(circle_target.x), static_cast<int>(circle_target.y), static_cast<int>(circle_pos.x), static_cast<int>(circle_pos.y), WHITE);
 
+		// 2. 円 B (緑色 / 半径20)
+		Novice::DrawEllipse(static_cast<int>(circle_pos.x), static_cast<int>(circle_pos.y), static_cast<int>(radiusB), static_cast<int>(radiusB), 0.0f, GREEN, kFillModeSolid);
+
+		// 1. 円 A (赤色 / 半径12)
+		Novice::DrawEllipse(static_cast<int>(circle_target.x), static_cast<int>(circle_target.y), static_cast<int>(radiusA), static_cast<int>(radiusA), 0.0f, RED, kFillModeSolid);
 
 		///
 		/// ↑描画処理ここまで
