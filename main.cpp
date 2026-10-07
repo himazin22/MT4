@@ -169,16 +169,16 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		ImGui::Text("Target: (0, 0, 0) / +Y up / Camera +Z forward");
 
-		// 球面座標(角度はrad表記)を編集可能にする[cite: 6]
+		// 球面座標(角度はrad表記)を編集可能にする
 		ImGui::DragFloat("Radius", &s.radius, 0.01f);
 		ImGui::DragFloat("Theta: elevation (rad)", &s.theta, 0.01f);
 		ImGui::DragFloat("Phi (rad)", &s.phi, 0.01f);
 
-		// 変換した直交座標と、作成したカメラ行列(4x4)を表示する[cite: 6]
-		ImGui::Text("Spherical: r = %.3f, theta = %.3f rad, phi = %.3f rad", s.radius, s.theta, s.phi); //[cite: 7]
-		ImGui::Text("Cartesian: x = %.3f, y = %.3f, z = %.3f", eye.x, eye.y, eye.z);                    //[cite: 7]
+		// 変換した直交座標と、作成したカメラ行列(4x4)を表示する
+		ImGui::Text("Spherical: r = %.3f, theta = %.3f rad, phi = %.3f rad", s.radius, s.theta, s.phi);
+		ImGui::Text("Cartesian: x = %.3f, y = %.3f, z = %.3f", eye.x, eye.y, eye.z);                  
 
-		ImGui::Text("Camera matrix"); //[cite: 7]
+		ImGui::Text("Camera matrix"); 
 		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[0][0], cameraMatrix.m[0][1], cameraMatrix.m[0][2], cameraMatrix.m[0][3]);
 		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[1][0], cameraMatrix.m[1][1], cameraMatrix.m[1][2], cameraMatrix.m[1][3]);
 		ImGui::Text("    %.3f    %.3f    %.3f    %.3f", cameraMatrix.m[2][0], cameraMatrix.m[2][1], cameraMatrix.m[2][2], cameraMatrix.m[2][3]);
