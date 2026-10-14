@@ -1,9 +1,9 @@
 #include <Novice.h>
 #define _USE_MATH_DEFINES
-#include <numbers>
-#include <cmath>
-#include <algorithm>
 #include <Novice.h>
+#include <algorithm>
+#include <cmath>
+#include <numbers>
 #define _USE_MATH_DEFINES
 #include "MyMathUtility.h"
 #include <algorithm>
@@ -24,17 +24,57 @@ struct Spherical {
 	float phi;
 };
 
+struct Quaternion {
+	float x;
+	float y;
+	float z;
+	float w;
+};
+
+Quaternion Multiply(const Quaternion& lhs, const Quaternion& rhs) {
+	Quaternion result;
+
+	result.x = lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y;
+	result.y = lhs.w * rhs.y - lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x;
+	result.z = lhs.w * rhs.z + lhs.x * rhs.y - lhs.y * rhs.x + lhs.z * rhs.w;
+
+	// スカラー部 (w) の計算
+	result.w = lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z;
+	return result;
+}
+// 単位クォータニオン（無回転を表す）
+Quaternion IdentityQuaternion() { return {0.0f, 0.0f, 0.0f, 1.0f}; }
+
+// 共役クォータニオン（回転軸を逆向きにする）
+Quaternion Conjugate(const Quaternion& quaternion) { return {-quaternion.x, -quaternion.y, -quaternion.z, quaternion.w}; }
+
+// クォータニオンのノルム（長さ）
+float Norm(const Quaternion& quaternion) { return std::sqrt(quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w); }
+
+// クォータニオンの正規化（長さを1にする。回転計算に必須）
+Quaternion Normalize(const Quaternion& quaternion) {
+	float norm = Norm(quaternion);
+	if (norm > 0.0f) {
+		return {quaternion.x / norm, quaternion.y / norm, quaternion.z / norm, quaternion.w / norm};
+	}
+	return quaternion;
+}
+// 逆クォータニオン（逆回転を表す）
+Quaternion Inverse(const Quaternion& quaternion) {
+	float normSq = quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w;
+	if (normSq > 0.0f) {
+		Quaternion conj = Conjugate(quaternion);
+		return {conj.x / normSq, conj.y / normSq, conj.z / normSq, conj.w / normSq};
+	}
+	return quaternion;
+}
 
 Vector3 ToCartesian(const Spherical& s) {
 	float rho = s.radius * cos(s.theta);
 	return {rho * cos(s.phi), s.radius * sin(s.theta), rho * sin(s.phi)};
 }
 
-enum InterpolationMode {
-	Linear,
-	Exponential
-};
-
+enum InterpolationMode { Linear, Exponential };
 
 Spherical ToSpherical(const Vector3& p) {
 	float r = sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
@@ -68,6 +108,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int prevMouseY = 0;
 	bool isFirstClick = true;
 
+	Quaternion q1 = {2.0f, 3.0f, 4.0f, 1.0f};
+	Quaternion q2 = {1.0f, 3.0f, 5.0f, 2.0f};
+
 	// --------------------------------------------------
 	// デバッグカメラ用変数
 	// --------------------------------------------------
@@ -80,7 +123,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	Spherical s{6.0f, 0.0f, -std::numbers::pi_v<float> / 2.0f};
 
 	// --------------------------------------------------
-	// 円の追従補間用変数 
+	// 円の追従補間用変数
 	// --------------------------------------------------
 	// 1. 円 A (赤色・マウス座標ターゲット / 半径 12)
 	Vector2 circle_target = {0.0f, 0.0f};
@@ -95,7 +138,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 	//  60fps 前提の固定 deltaTime
 	const float deltaTime = 1.0f / 60.0f;
-
 
 	// 補間モード (デフォルトは線形補間)
 	int currentMode = InterpolationMode::Linear;
@@ -203,6 +245,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		Matrix4x4 cameraMatrix = {right.x, right.y, right.z, 0.0f, up.x, up.y, up.z, 0.0f, forward.x, forward.y, forward.z, 0.0f, eye.x, eye.y, eye.z, 1.0f};
 
+		Quaternion identity = IdentityQuaternion();
+		Quaternion conj = Conjugate(q1);
+		Quaternion inv = Inverse(q1);
+		Quaternion normal = Normalize(q1);
+		Quaternion mul1 = Multiply(q1, q2);
+		Quaternion mul2 = Multiply(q2, q1);
+
+		float norm = Norm(q1);
 		// ===================================
 		// ImGui の処理
 		// ===================================
@@ -293,6 +343,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		// 1. 円 A (赤色 / 半径12)
 		Novice::DrawEllipse(static_cast<int>(circle_target.x), static_cast<int>(circle_target.y), static_cast<int>(radiusA), static_cast<int>(radiusA), 0.0f, RED, kFillModeSolid);
+
+		int y = 0;
+		int lineHeight = 20;
+
+		Novice::ScreenPrintf(0, y, "%.2f   %.2f   %.2f   %.2f       : Identity", identity.x, identity.y, identity.z, identity.w);
+		y += lineHeight;
+		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f   %.2f       : Conjugate", conj.x, conj.y, conj.z, conj.w);
+		y += lineHeight;
+		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f   %.2f       : Inverse", inv.x, inv.y, inv.z, inv.w);
+		y += lineHeight;
+		Novice::ScreenPrintf(0, y, "%.2f   %.2f   %.2f   %.2f       : Normalize", normal.x, normal.y, normal.z, normal.w);
+		y += lineHeight;
+		Novice::ScreenPrintf(0, y, "%.2f   %.2f   %.2f  %.2f     : Multiply(q1, q2)", mul1.x, mul1.y, mul1.z, mul1.w);
+		y += lineHeight;
+		Novice::ScreenPrintf(0, y, "%.2f   %.2f  %.2f  %.2f     : Multiply(q2, q1)", mul2.x, mul2.y, mul2.z, mul2.w);
+		y += lineHeight;
+		Novice::ScreenPrintf(0, y, "%.2f                            : Norm", norm);
 
 		///
 		/// ↑描画処理ここまで
