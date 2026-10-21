@@ -69,6 +69,90 @@ Quaternion Inverse(const Quaternion& quaternion) {
 	return quaternion;
 }
 
+Quaternion MakeRotateAxisAngleQuaternion(const Vector3& axis, float angle) {
+	Quaternion q;
+
+	float halfAngle = angle * 0.5f;
+
+	float sinHalf = std::sin(halfAngle);
+	float cosHalf = std::cos(halfAngle);
+	q.x = axis.x * sinHalf;
+	q.y = axis.y * sinHalf;
+	q.z = axis.z * sinHalf;
+
+	q.w = cosHalf;
+
+	return q;
+}
+
+Vector3 RotateVector(const Vector3& vector, Quaternion& quaternion) {
+	float qx = quaternion.x;
+	float qy = quaternion.y;
+	float qz = quaternion.z;
+	float qw = quaternion.w;
+
+	Vector3 uv;
+
+	uv.x = qy * vector.z - qz * vector.y;
+	uv.y = qz * vector.x - qx * vector.z;
+	uv.z = qx * vector.y - qy * vector.x;
+
+	Vector3 uuv;
+
+	uuv.x = qy * uv.z - qz * uv.y;
+	uuv.y = qz * uv.x - qx * uv.z;
+	uuv.z = qx * uv.y - qy * uv.x;
+
+	Vector3 result;
+
+	result.x = vector.x + (uv.x * qw + uuv.x) * 2.0f;
+	result.y = vector.y + (uv.y * qw + uuv.y) * 2.0f;
+	result.z = vector.z + (uv.z * qw + uuv.z) * 2.0f;
+
+	return result;
+}
+
+Matrix4x4 MakeRotateMatrix(const Quaternion& quaternion) {
+	Matrix4x4 mat;
+
+	float xx = quaternion.x * quaternion.x;
+	float yy = quaternion.y * quaternion.y;
+	float zz = quaternion.z * quaternion.z;
+
+	float xy = quaternion.x * quaternion.y;
+	float xz = quaternion.x * quaternion.z;
+	float yz = quaternion.y * quaternion.z;
+
+	float wx = quaternion.w * quaternion.x;
+	float wy = quaternion.w * quaternion.y;
+	float wz = quaternion.w * quaternion.z;
+
+	// 1行目
+	mat.m[0][0] = 1.0f - 2.0f * (yy + zz);
+	mat.m[0][1] = 2.0f * (xy + wz); // 修正: -wz から +wz
+	mat.m[0][2] = 2.0f * (xz - wy); // 修正: +wy から -wy
+	mat.m[0][3] = 0.0f;
+
+	// 2行目
+	mat.m[1][0] = 2.0f * (xy - wz); // 修正: +wz から -wz
+	mat.m[1][1] = 1.0f - 2.0f * (xx + zz);
+	mat.m[1][2] = 2.0f * (yz + wx); // 修正: -wx から +wx
+	mat.m[1][3] = 0.0f;
+
+	// 3行目
+	mat.m[2][0] = 2.0f * (xz + wy); // 修正: -wy から +wy
+	mat.m[2][1] = 2.0f * (yz - wx); // 修正: +wx から -wx
+	mat.m[2][2] = 1.0f - 2.0f * (xx + yy);
+	mat.m[2][3] = 0.0f;
+
+	// 4行目
+	mat.m[3][0] = 0.0f;
+	mat.m[3][1] = 0.0f;
+	mat.m[3][2] = 0.0f;
+	mat.m[3][3] = 1.0f;
+
+	return mat;
+}
 Vector3 ToCartesian(const Spherical& s) {
 	float rho = s.radius * cos(s.theta);
 	return {rho * cos(s.phi), s.radius * sin(s.theta), rho * sin(s.phi)};
@@ -245,14 +329,19 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		Matrix4x4 cameraMatrix = {right.x, right.y, right.z, 0.0f, up.x, up.y, up.z, 0.0f, forward.x, forward.y, forward.z, 0.0f, eye.x, eye.y, eye.z, 1.0f};
 
-		Quaternion identity = IdentityQuaternion();
-		Quaternion conj = Conjugate(q1);
-		Quaternion inv = Inverse(q1);
-		Quaternion normal = Normalize(q1);
-		Quaternion mul1 = Multiply(q1, q2);
-		Quaternion mul2 = Multiply(q2, q1);
+		// --------------------------------------------------
+		// 新しいクォータニオンと行列の計算
+		// --------------------------------------------------
 
-		float norm = Norm(q1);
+		Vector3 axis = {1.0f, 0.4f, -0.2f};
+		Vector3 normAxis = MyMathUtility::Normalize(axis);
+		Quaternion rotation = MakeRotateAxisAngleQuaternion(normAxis, 0.45f);
+		Vector3 pointY = {2.1f, -0.9f, 1.3f};
+
+		Matrix4x4 rotateMatrix = MakeRotateMatrix(rotation);
+		Vector3 rotateByQuaternion = RotateVector(pointY, rotation);
+		Vector3 rotateByMatrix = MyMathUtility::Transform(pointY, rotateMatrix);
+
 		// ===================================
 		// ImGui の処理
 		// ===================================
@@ -345,21 +434,23 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		Novice::DrawEllipse(static_cast<int>(circle_target.x), static_cast<int>(circle_target.y), static_cast<int>(radiusA), static_cast<int>(radiusA), 0.0f, RED, kFillModeSolid);
 
 		int y = 0;
-		int lineHeight = 20;
+		int kRowHeight = 20;
 
-		Novice::ScreenPrintf(0, y, "%.2f   %.2f   %.2f   %.2f       : Identity", identity.x, identity.y, identity.z, identity.w);
-		y += lineHeight;
-		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f   %.2f       : Conjugate", conj.x, conj.y, conj.z, conj.w);
-		y += lineHeight;
-		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f   %.2f       : Inverse", inv.x, inv.y, inv.z, inv.w);
-		y += lineHeight;
-		Novice::ScreenPrintf(0, y, "%.2f   %.2f   %.2f   %.2f       : Normalize", normal.x, normal.y, normal.z, normal.w);
-		y += lineHeight;
-		Novice::ScreenPrintf(0, y, "%.2f   %.2f   %.2f  %.2f     : Multiply(q1, q2)", mul1.x, mul1.y, mul1.z, mul1.w);
-		y += lineHeight;
-		Novice::ScreenPrintf(0, y, "%.2f   %.2f  %.2f  %.2f     : Multiply(q2, q1)", mul2.x, mul2.y, mul2.z, mul2.w);
-		y += lineHeight;
-		Novice::ScreenPrintf(0, y, "%.2f                            : Norm", norm);
+		Novice::ScreenPrintf(0, y, "%.2f   %.2f  %.2f  %.2f        : rotation", rotation.x, rotation.y, rotation.z, rotation.w);
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "rotateMatrix");
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[0][0], rotateMatrix.m[0][1], rotateMatrix.m[0][2], rotateMatrix.m[0][3]);
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[1][0], rotateMatrix.m[1][1], rotateMatrix.m[1][2], rotateMatrix.m[1][3]);
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[2][0], rotateMatrix.m[2][1], rotateMatrix.m[2][2], rotateMatrix.m[2][3]);
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[3][0], rotateMatrix.m[3][1], rotateMatrix.m[3][2], rotateMatrix.m[3][3]);
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f               : rotateByQuaternion", rotateByQuaternion.x, rotateByQuaternion.y, rotateByQuaternion.z);
+		y += kRowHeight;
+		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f               : rotateByMatrix", rotateByMatrix.x, rotateByMatrix.y, rotateByMatrix.z);
 
 		///
 		/// ↑描画処理ここまで
