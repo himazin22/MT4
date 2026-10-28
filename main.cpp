@@ -173,6 +173,52 @@ Spherical ToSpherical(const Vector3& p) {
 	return {r, std::asin(sinTheta), phi};
 }
 
+// 内積：2つの矢印がどれだけ同じ向きか（同じ向き=1、直角=0、真逆=-1）
+float Dot(const Vector3& a, const Vector3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+// fromの向きをtoの向きへ回す単位クォータニオンを返す
+Quaternion DirectionToDirection(const Vector3& from, const Vector3& to) {
+	const float kEpsilon = 1.0e-6f; // 「ほぼ同じ」と見なす小さい数
+
+	float dot = Dot(from, to);
+
+	// ① ほぼ同じ向き → 回さなくてOK
+	if (dot >= 1.0f - kEpsilon) {
+		return IdentityQuaternion();
+	}
+
+	// ② ほぼ真逆の向き → 軸が決まらないので、fromに垂直な軸を自分で作る
+	if (dot <= -1.0f + kEpsilon) {
+		Vector3 axis;
+		if (std::fabs(from.x) > kEpsilon || std::fabs(from.y) > kEpsilon) {
+			// fromに垂直な軸 (x, yを入れ替えて片方の符号を反転)
+			axis = {from.y, -from.x, 0.0f};
+		} else {
+			// fromがほぼZ軸のときは別の垂直な軸を使う
+			axis = {from.z, 0.0f, -from.x};
+		}
+		axis = MyMathUtility::Normalize(axis);
+		// 180度(π)回す
+		return MakeRotateAxisAngleQuaternion(axis, std::numbers::pi_v<float>);
+	}
+
+	// ③ ふつうの場合 → 外積が軸、acos(内積)が角度
+	Vector3 axis = MyMathUtility::Normalize(MyMathUtility::Cross(from, to));
+	float angle = std::acos(std::clamp(dot, -1.0f, 1.0f)); // acosは範囲外だとエラーになるのでclamp
+	return MakeRotateAxisAngleQuaternion(axis, angle);
+}
+
+const int kRowHeight = 20;
+
+void MatrixScreenPrintf(int x, int y, const Matrix4x4& matrix, const char* label) {
+	Novice::ScreenPrintf(x, y, "%s", label);
+	for (int row = 0; row < 4; ++row) {
+		for (int column = 0; column < 4; ++column) {
+			Novice::ScreenPrintf(x + column * 60, y + (row + 1) * kRowHeight, "%6.3f", matrix.m[row][column]);
+		}
+	}
+}
+
 const char kWindowTitle[] = "LE2C_18_ツノダ_タケマサ";
 
 // Windowsアプリでのエントリーポイント(main関数)
@@ -333,14 +379,15 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 新しいクォータニオンと行列の計算
 		// --------------------------------------------------
 
-		Vector3 axis = {1.0f, 0.4f, -0.2f};
-		Vector3 normAxis = MyMathUtility::Normalize(axis);
-		Quaternion rotation = MakeRotateAxisAngleQuaternion(normAxis, 0.45f);
-		Vector3 pointY = {2.1f, -0.9f, 1.3f};
+		Vector3 from0 = MyMathUtility::Normalize(Vector3{1.0f, 0.7f, 0.5f});
+		Vector3 to0 = {-from0.x, -from0.y, -from0.z}; // -from0 と同じ
+		Vector3 from1 = MyMathUtility::Normalize(Vector3{-0.6f, 0.9f, 0.2f});
+		Vector3 to1 = MyMathUtility::Normalize(Vector3{0.4f, 0.7f, -0.5f});
 
-		Matrix4x4 rotateMatrix = MakeRotateMatrix(rotation);
-		Vector3 rotateByQuaternion = RotateVector(pointY, rotation);
-		Vector3 rotateByMatrix = MyMathUtility::Transform(pointY, rotateMatrix);
+		// DirectionToDirectionはQuaternionを返すので、MakeRotateMatrixで行列にする
+		Matrix4x4 rotateMatrix0 = MakeRotateMatrix(DirectionToDirection(MyMathUtility::Normalize(Vector3{1.0f, 0.0f, 0.0f}), MyMathUtility::Normalize(Vector3{-1.0f, 0.0f, 0.0f})));
+		Matrix4x4 rotateMatrix1 = MakeRotateMatrix(DirectionToDirection(from0, to0));
+		Matrix4x4 rotateMatrix2 = MakeRotateMatrix(DirectionToDirection(from1, to1));
 
 		// ===================================
 		// ImGui の処理
@@ -433,24 +480,9 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 1. 円 A (赤色 / 半径12)
 		Novice::DrawEllipse(static_cast<int>(circle_target.x), static_cast<int>(circle_target.y), static_cast<int>(radiusA), static_cast<int>(radiusA), 0.0f, RED, kFillModeSolid);
 
-		int y = 0;
-		int kRowHeight = 20;
-
-		Novice::ScreenPrintf(0, y, "%.2f   %.2f  %.2f  %.2f        : rotation", rotation.x, rotation.y, rotation.z, rotation.w);
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "rotateMatrix");
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[0][0], rotateMatrix.m[0][1], rotateMatrix.m[0][2], rotateMatrix.m[0][3]);
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[1][0], rotateMatrix.m[1][1], rotateMatrix.m[1][2], rotateMatrix.m[1][3]);
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[2][0], rotateMatrix.m[2][1], rotateMatrix.m[2][2], rotateMatrix.m[2][3]);
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "%.3f %.3f %.3f %.3f", rotateMatrix.m[3][0], rotateMatrix.m[3][1], rotateMatrix.m[3][2], rotateMatrix.m[3][3]);
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f               : rotateByQuaternion", rotateByQuaternion.x, rotateByQuaternion.y, rotateByQuaternion.z);
-		y += kRowHeight;
-		Novice::ScreenPrintf(0, y, "%.2f  %.2f  %.2f               : rotateByMatrix", rotateByMatrix.x, rotateByMatrix.y, rotateByMatrix.z);
+		MatrixScreenPrintf(0, 0, rotateMatrix0, "rotateMatrix0");
+		MatrixScreenPrintf(0, kRowHeight * 5, rotateMatrix1, "rotateMatrix1");
+		MatrixScreenPrintf(0, kRowHeight * 10, rotateMatrix2, "rotateMatrix2");
 
 		///
 		/// ↑描画処理ここまで
