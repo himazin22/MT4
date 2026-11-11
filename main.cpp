@@ -219,6 +219,56 @@ void MatrixScreenPrintf(int x, int y, const Matrix4x4& matrix, const char* label
 	}
 }
 
+Quaternion Slerp(Quaternion q0, const Quaternion& q1, float t) {
+
+	float dot = q0.x * q1.x + q0.y * q1.y + q0.z * q1.z + q0.w * q1.w;
+
+	if (dot < 0) {
+		q0.x =-q0.x;
+		q0.y =-q0.y;
+		q0.z =-q0.z;
+		q0.w =-q0.w;
+		dot = -dot;
+	}
+	// --- ゼロ除算対策（2つの回転がほぼ同じ場合） ---
+	if (dot >= 0.999f) {
+		Quaternion result;
+		// 【修正】t q1 ではなく t * q1. 各成分ごとに計算します
+		result.x = (1.0f - t) * q0.x + t * q1.x;
+		result.y = (1.0f - t) * q0.y + t * q1.y;
+		result.z = (1.0f - t) * q0.z + t * q1.z;
+		result.w = (1.0f - t) * q0.w + t * q1.w;
+
+		// 【修正】Normalize() の代わりの手動計算（三平方の定理で長さを出して割る）
+		float length = std::sqrt(result.x * result.x + result.y * result.y + result.z * result.z + result.w * result.w);
+		if (length > 0.0f) {
+			result.x /= length;
+			result.y /= length;
+			result.z /= length;
+			result.w /= length;
+		}
+		return result;
+	}
+
+	// 3. 2つの回転のなす角（theta）を求める
+	float theta = std::acos(dot);
+
+	// 4. 球面をなめらかに移動するための割合（係数）を計算
+	float sinTheta = std::sin(theta);
+	float scale0 = std::sin((1.0f - t) * theta) / sinTheta;
+	float scale1 = std::sin(t * theta) / sinTheta;
+
+	// 5. 混ぜ合わせる
+	// 【修正】scale0 * q0 もエラーになる可能性が高いので、各成分ごとに計算します
+	Quaternion finalResult;
+	finalResult.x = scale0 * q0.x + scale1 * q1.x;
+	finalResult.y = scale0 * q0.y + scale1 * q1.y;
+	finalResult.z = scale0 * q0.z + scale1 * q1.z;
+	finalResult.w = scale0 * q0.w + scale1 * q1.w;
+
+	return finalResult;
+}
+
 const char kWindowTitle[] = "LE2C_18_ツノダ_タケマサ";
 
 // Windowsアプリでのエントリーポイント(main関数)
@@ -238,8 +288,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 	int prevMouseY = 0;
 	bool isFirstClick = true;
 
-	Quaternion q1 = {2.0f, 3.0f, 4.0f, 1.0f};
-	Quaternion q2 = {1.0f, 3.0f, 5.0f, 2.0f};
 
 	// --------------------------------------------------
 	// デバッグカメラ用変数
@@ -379,15 +427,14 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 新しいクォータニオンと行列の計算
 		// --------------------------------------------------
 
-		Vector3 from0 = MyMathUtility::Normalize(Vector3{1.0f, 0.7f, 0.5f});
-		Vector3 to0 = {-from0.x, -from0.y, -from0.z}; // -from0 と同じ
-		Vector3 from1 = MyMathUtility::Normalize(Vector3{-0.6f, 0.9f, 0.2f});
-		Vector3 to1 = MyMathUtility::Normalize(Vector3{0.4f, 0.7f, -0.5f});
+		Quaternion rotation0 = MakeRotateAxisAngleQuaternion({0.71f, 0.71f, 0.0f}, 0.3f);
+		Quaternion rotation1 = MakeRotateAxisAngleQuaternion({0.71f, 0.0f, 0.71f}, 3.141592f);
 
-		// DirectionToDirectionはQuaternionを返すので、MakeRotateMatrixで行列にする
-		Matrix4x4 rotateMatrix0 = MakeRotateMatrix(DirectionToDirection(MyMathUtility::Normalize(Vector3{1.0f, 0.0f, 0.0f}), MyMathUtility::Normalize(Vector3{-1.0f, 0.0f, 0.0f})));
-		Matrix4x4 rotateMatrix1 = MakeRotateMatrix(DirectionToDirection(from0, to0));
-		Matrix4x4 rotateMatrix2 = MakeRotateMatrix(DirectionToDirection(from1, to1));
+		Quaternion interpolate0 = Slerp(rotation0, rotation1, 0.0f);
+		Quaternion interpolate1 = Slerp(rotation0, rotation1, 0.3f);
+		Quaternion interpolate2 = Slerp(rotation0, rotation1, 0.5f);
+		Quaternion interpolate3 = Slerp(rotation0, rotation1, 0.7f);
+		Quaternion interpolate4 = Slerp(rotation0, rotation1, 1.0f);
 
 		// ===================================
 		// ImGui の処理
@@ -397,7 +444,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
 		ImGui::Checkbox("Enable Debug Camera (Hotkey: C)", &enableDebugCamera);
 		ImGui::Separator();
-
+		
 		ImGui::Text("Target: Mouse Position (Red Circle)");
 		ImGui::Separator();
 
@@ -480,9 +527,18 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 		// 1. 円 A (赤色 / 半径12)
 		Novice::DrawEllipse(static_cast<int>(circle_target.x), static_cast<int>(circle_target.y), static_cast<int>(radiusA), static_cast<int>(radiusA), 0.0f, RED, kFillModeSolid);
 
-		MatrixScreenPrintf(0, 0, rotateMatrix0, "rotateMatrix0");
-		MatrixScreenPrintf(0, kRowHeight * 5, rotateMatrix1, "rotateMatrix1");
-		MatrixScreenPrintf(0, kRowHeight * 10, rotateMatrix2, "rotateMatrix2");
+		// ==================================================
+		// クォータニオンの補間結果を描画
+		// ==================================================
+		int textX = 10;
+		int textY = 50; // 表示を開始する高さ。必要に応じて調整してください
+		int lineHeight = 20;
+
+		Novice::ScreenPrintf(textX, textY + lineHeight * 0, "%.2f  %.2f  %.2f  %.2f       : interpolate0, Slerp(q0, q1, 0.0f)", interpolate0.x, interpolate0.y, interpolate0.z, interpolate0.w);
+		Novice::ScreenPrintf(textX, textY + lineHeight * 1, "%.2f  %.2f  %.2f  %.2f       : interpolate1, Slerp(q0, q1, 0.3f)", interpolate1.x, interpolate1.y, interpolate1.z, interpolate1.w);
+		Novice::ScreenPrintf(textX, textY + lineHeight * 2, "%.2f  %.2f  %.2f  %.2f       : interpolate2, Slerp(q0, q1, 0.5f)", interpolate2.x, interpolate2.y, interpolate2.z, interpolate2.w);
+		Novice::ScreenPrintf(textX, textY + lineHeight * 3, "%.2f  %.2f  %.2f  %.2f       : interpolate3, Slerp(q0, q1, 0.7f)", interpolate3.x, interpolate3.y, interpolate3.z, interpolate3.w);
+		Novice::ScreenPrintf(textX, textY + lineHeight * 4, "%.2f  %.2f  %.2f  %.2f       : interpolate4, Slerp(q0, q1, 1.0f)", interpolate4.x, interpolate4.y, interpolate4.z, interpolate4.w);
 
 		///
 		/// ↑描画処理ここまで
